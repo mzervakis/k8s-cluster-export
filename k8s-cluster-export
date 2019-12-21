@@ -12,12 +12,12 @@
 
 set -e
 set -o errtrace     # Inherit ERR trap from shell functions
-#set -x
+#set -xv
 
 function errtrap {
-   echo $?
+   echo $? >&2
    RED='\033[0;31m'
-   echo -e "\n\n\n${RED} ---- ERROR: unexpected termination! ----\n"
+   echo -e "\n\n\n${RED} ---- ERROR: unexpected termination! ----\n" >&2
    exit 1
 }
 
@@ -120,6 +120,7 @@ objectmeta_v1=(
   "metadata.selfLink"
   "metadata.resourceVersion"
   "metadata.uid"
+#  "metadata.generation"
 )
 
 function main {
@@ -147,9 +148,9 @@ function export_config {
   status_output "start export resources for ns $NAMESPACE" "step"
 
   if [ -n "$NAMESPACE" ]; then
-    mkdir -p $SOURCE/$NAMESPACE
+    mkdir -p "$SOURCE/$NAMESPACE"
   else
-    mkdir -p $SOURCE/CLUSTER
+    mkdir -p "$SOURCE/CLUSTER"
   fi
   
   for r in "${export_resources[@]}"; do
@@ -246,25 +247,25 @@ function check_manual_resource {
 function show_diff {
   status_output "changes" "warn"
   if [ -x "$(command -v colordiff)" ] && [ -n $TERM ]; then
-    colordiff -y --suppress-common-lines $RAW $RESULT || true
+    colordiff -y --suppress-common-lines "$RAW" "$RESULT" || true
   else
-    diff --color=never -y $RAW $RESULT || true
+    diff -y "$RAW" "$RESULT" || true
   fi
 }
 
 function remove_yaml_value {
   arr=("$@")
   for i in "${arr[@]}"; do
-    yq d -i $RESULT $i
+    yq d -i "$RESULT" $i
   done
 }
 
 function change_namespace {
   if [ -n "$NEW_NAMESPACE" ]; then
     if [ $TYPE == "pv" ]; then
-      yq w -i $RESULT spec.claimRef.namespace $NEW_NAMESPACE
+      yq w -i "$RESULT" spec.claimRef.namespace $NEW_NAMESPACE
     else
-      yq w -i $RESULT metadata.namespace $NEW_NAMESPACE
+      yq w -i "$RESULT" metadata.namespace $NEW_NAMESPACE
     fi
   fi
 }
@@ -289,11 +290,11 @@ function set_targets {
 function remove_status {
   # reset status
   if [[ " (pvc deploy quota limits job) " =~ " $TYPE " ]]; then
-    yq d -i $RESULT status ; echo 'status: {}' >> $RESULT
+    yq d -i "$RESULT" status ; echo 'status: {}' >> "$RESULT"
   elif [ $TYPE == "sts" ]; then
-    yq d -i $RESULT status ; echo -e 'status:\n  replicas: 0' >> $RESULT
+    yq d -i "$RESULT" status ; echo -e 'status:\n  replicas: 0' >> "$RESULT"
   elif [ $TYPE == "svc" ] || [ $TYPE == "ing" ]; then
-    yq d -i $RESULT status ; echo -e 'status:\n  loadBalancer: {}' >> $RESULT
+    yq d -i "$RESULT" status ; echo -e 'status:\n  loadBalancer: {}' >> "$RESULT"
   fi
 }
 
@@ -304,10 +305,10 @@ function export_resource {
   
   if [ -n "$NAMESPACE" ]; then
     kubectl_namespace="-n ${NAMESPACE}"
-    mkdir -p $SOURCE/$NAMESPACE/$2_$1
+    mkdir -p "$SOURCE/$NAMESPACE/$2_$1"
     TARGET_FOLDER="$SOURCE/$NAMESPACE/$2_$1"
   else
-    mkdir -p $SOURCE/CLUSTER/$2_$1
+    mkdir -p "$SOURCE/CLUSTER/$2_$1"
     TARGET_FOLDER="$SOURCE/CLUSTER/$2_$1"
   fi
 
@@ -322,20 +323,20 @@ function export_resource {
       status_output "no value set skip export for $TYPE $i" "warn"
     else
       # export resource and adjust the output
-      ${KUBECTL} get $TYPE $i -o yaml ${kubectl_namespace} > $RAW
-      cp $RAW $RESULT
+      ${KUBECTL} get $TYPE $i -o yaml ${kubectl_namespace} > "$RAW"
+      cp "$RAW" "$RESULT"
       remove_yaml_value "${remove[@]}"
       # only export PVs for correspoinding PVCs
       if [ "$1" = "pvc" ]; then
-        pv_targets+=($(yq r $RESULT spec.volumeName))
+        pv_targets+=($(yq r "$RESULT" spec.volumeName))
       # change generation to 1 for sts
       elif [ "$1" = "sts" ]; then
-        yq w -i $RESULT metadata.generation 1
+        yq w -i "$RESULT" metadata.generation 1
       fi
       change_namespace
       remove_status
       show_diff
-      rm -f $RAW
+      rm -f "$RAW"
     fi
   done
 }
